@@ -1,0 +1,13 @@
+[package]
+name = "gear-design-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0"
+
+[features]
+tip-relief = []
+
+[lints.rust]
+dead_code = "allow"
