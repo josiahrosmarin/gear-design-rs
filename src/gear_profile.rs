@@ -161,12 +161,51 @@ impl GearProfile {
         self.module() * PI
     }
 
-    pub fn shifted_solidworks_equations(&self, tooth_shift: f64) {
-        // let shift = tooth_shift * PI / self.teeth as f64;
-        let shift = 0.0;
+    /// Calculates the roll angle offset required to achieve the gear's circular thickness.
+    ///
+    /// The roll angle offset is the shift in the roll angle of the involute to produce the desired
+    /// circular thickness at the pitch diameter.
+    ///
+    /// # Returns
+    ///
+    /// The roll angle offset in radians.
+    pub fn roll_angle_offset(&self) -> Result<f64, GearError> {
+        roll_angle_offset(
+            self.base_diameter(),
+            self.pitch_diameter(),
+            self.circular_thickness,
+        )
+    }
+
+    /// Calculates the tooth thickness at a specified diameter.
+    ///
+    /// This function determines the tooth thickness at an arbitrary diameter
+    /// along the tooth profile. It uses the roll angle offset and the roll angle
+    /// at the specified diameter to compute the thickness.
+    ///
+    /// # Parameters
+    ///
+    /// * `evaluated_diameter`: The diameter (in the same units as the module) at which to calculate the tooth thickness.
+    ///
+    /// # Returns
+    ///
+    /// A `Result<f64, GearError>` containing the tooth thickness (in the same units as the module)
+    /// or an error if the `evaluated_diameter` is invalid.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `GearError::InvalidInvoluteDiameter` if the `evaluated_diameter` is less than the base diameter.
+    pub fn thickness_at_diameter(&self, evaluated_diameter: f64) -> Result<f64, GearError> {
+        let offset_angle = self.roll_angle_offset()?;
+        let roll_angle = roll_angle_at_diameter(self.base_diameter(), evaluated_diameter)?;
+        let thickness_angle = offset_angle - roll_angle;
+        Ok(thickness_angle * evaluated_diameter)
+    }
+
+    pub fn shifted_solidworks_equations(&self, tooth_shift: f64) -> Result<(), GearError> {
+        let shift = tooth_shift * PI / self.teeth as f64;
         let base_radius = self.base_diameter / 2.0;
-        // let offset = -self.profile_offset_angle();
-        let offset = 0.0;
+        let offset = -self.roll_angle_offset()?;
         println!("{}t - {:.2}m", self.teeth, self.module);
         println!(
             "{:.6} * ( cos(t{:+.6}) + t*sin(t{:+.6}) )",
@@ -193,6 +232,7 @@ impl GearProfile {
             offset - shift,
             offset - shift
         );
+        Ok(())
     }
 }
 
@@ -258,27 +298,33 @@ fn check_involute_self_interference(
     circular_thickness: f64,
     involute_end_diameter: f64,
 ) -> bool {
-    let base_diameter = profile.base_diameter();
-    let pitch_diameter = profile.pitch_diameter();
-
-    // Check if roll angle calculation is successful
-    let roll_angle_pitch = match roll_angle_at_diameter(base_diameter, pitch_diameter) {
+    let roll_angle = match roll_angle_offset(
+        profile.base_diameter(),
+        profile.pitch_diameter(),
+        circular_thickness,
+    ) {
         Ok(angle) => angle,
-        Err(_) => return false, // Return false if there's an error
-    };
-    let roll_angle_end = match roll_angle_at_diameter(base_diameter, involute_end_diameter) {
-        Ok(angle) => angle,
-        Err(_) => return false, // Return false if there's an error
+        Err(_) => return false,
     };
 
-    let roll_angle_difference = (roll_angle_end - roll_angle_pitch).abs();
-    let half_tooth_thickness_angle = circular_thickness / pitch_diameter / 2.0;
+    let involute_intersection = involute(profile.base_diameter(), roll_angle, 0.0);
+    let max_non_interfering_diameter = involute_intersection.radius() * 2.0;
 
-    if roll_angle_difference > half_tooth_thickness_angle {
-        return false;
-    } else {
-        return true;
-    }
+    involute_end_diameter < max_non_interfering_diameter
+}
+
+fn roll_angle_offset(
+    base_diameter: f64,
+    reference_diameter: f64,
+    reference_thickness: f64,
+) -> Result<f64, GearError> {
+    let roll_angle_reference = roll_angle_at_diameter(base_diameter, reference_diameter)?;
+    // Calculate the angle subtended by half the tooth thickness at the reference circle
+    let half_thickness_angle = reference_thickness / reference_diameter;
+
+    // The roll angle offset is the difference between the involute angle at the pitch circle
+    // and half the tooth angle.
+    Ok(roll_angle_reference - half_thickness_angle)
 }
 
 /// Approximates the involute curve of a gear profile using circular arcs.
