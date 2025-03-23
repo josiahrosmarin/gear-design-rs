@@ -43,10 +43,24 @@ pub enum GeometryError {
     InteriorPointNotOnArc,
 }
 
+/// Represents errors specific to GearMesh validation and operations.
+#[derive(Error, Debug, PartialEq)]
+pub enum GearMeshError {
+    /// Indicates that the gear modules are incompatible.
+    #[error("Gear modules are incompatible.")]
+    IncompatibleModule,
+
+    /// Indicates that the ratio of teeth does not match the ratio of base diameters.
+    #[error("The ratio of teeth does not match the ratio of base diameters.")]
+    IncompatibleBaseDiameterRatio,
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum GearDesignError {
     #[error(transparent)]
     Gear(#[from] GearError),
     #[error(transparent)]
     Geometry(#[from] GeometryError),
+    #[error(transparent)]
+    Mesh(#[from] GearMeshError),
 }

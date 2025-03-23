@@ -161,6 +161,18 @@ impl GearProfile {
         self.module() * PI
     }
 
+    /// Calculates the base pitch of the gear.
+    ///
+    /// The base pitch is the distance between corresponding points on adjacent teeth
+    /// measured along the base circle.
+    ///
+    /// # Returns
+    ///
+    /// The base pitch of the gear.
+    pub fn base_pitch(&self) -> f64 {
+        PI * self.base_diameter / self.teeth as f64
+    }
+
     /// Calculates the roll angle offset required to achieve the gear's circular thickness.
     ///
     /// The roll angle offset is the shift in the roll angle of the involute to produce the desired

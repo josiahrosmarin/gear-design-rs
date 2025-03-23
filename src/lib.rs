@@ -1,4 +1,5 @@
 pub mod error;
+pub mod gear_mesh;
 pub mod gear_profile;
 pub mod geometry;
 pub mod spur_gear;
