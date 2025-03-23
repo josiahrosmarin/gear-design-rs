@@ -100,7 +100,7 @@ impl GearProfile {
         if circular_thickness < 0.0 || self.circular_pitch() < circular_thickness {
             return Err(GearError::InvalidCircularThickness);
         }
-        if check_involute_interference(self, circular_thickness, self.involute_end_diameter) {
+        if check_involute_self_interference(self, circular_thickness, self.involute_end_diameter) {
             self.circular_thickness = circular_thickness;
             Ok(())
         } else {
@@ -120,7 +120,7 @@ impl GearProfile {
         &mut self,
         involute_end_diameter: f64,
     ) -> Result<(), GearError> {
-        if check_involute_interference(self, self.circular_thickness, involute_end_diameter) {
+        if check_involute_self_interference(self, self.circular_thickness, involute_end_diameter) {
             self.involute_end_diameter = involute_end_diameter;
             Ok(())
         } else {
@@ -253,7 +253,7 @@ fn roll_angle_at_diameter(base_diameter: f64, evaluated_diameter: f64) -> Result
 ///
 /// Returns `false` if the `roll_angle_at_diameter` function returns an error,
 /// indicating that the involute diameter is invalid.
-fn check_involute_interference(
+fn check_involute_self_interference(
     profile: &GearProfile,
     circular_thickness: f64,
     involute_end_diameter: f64,
@@ -313,16 +313,37 @@ pub fn approximate_involute(
     'segment_count_loop: for segment_count in 1..21 {
         let mut arcs = Vec::new();
         let vertex_count = segment_count * 2 + 1;
-        let vertex_spacing = double_annulus / (vertex_count as f64 - 1.0);
+
+        let mut value = 0.0;
+        let mut spacing = vec![0.0];
+        for i in 1..vertex_count {
+            value = value + i as f64;
+            spacing.push(value);
+        }
+        let sum: f64 = spacing.iter().sum();
+
+        let diameters: Vec<f64> = spacing
+            .into_iter()
+            .map(|value| form_diameter + value * double_annulus / sum)
+            .collect();
+
         // Form and test each arc
         for segment in 0..segment_count {
-            let test_diameter_0 = form_diameter + segment as f64 * vertex_spacing * 2.0;
+            let index = segment * 2;
+
+            let test_diameter_0 = *diameters.get(index + 0).ok_or(GearDesignError::Gear(
+                GearError::InvoluteApproximationFailed,
+            ))?;
             let vertex_0 = involute_point(test_diameter_0)?;
 
-            let test_diameter_1 = test_diameter_0 + vertex_spacing;
+            let test_diameter_1 = *diameters.get(index + 1).ok_or(GearDesignError::Gear(
+                GearError::InvoluteApproximationFailed,
+            ))?;
             let vertex_1 = involute_point(test_diameter_1)?;
 
-            let test_diameter_2 = test_diameter_1 + vertex_spacing;
+            let test_diameter_2 = *diameters.get(index + 2).ok_or(GearDesignError::Gear(
+                GearError::InvoluteApproximationFailed,
+            ))?;
             let vertex_2 = involute_point(test_diameter_2)?;
 
             let arc = fit_arc([&vertex_0, &vertex_2], &vertex_1)?;
