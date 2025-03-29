@@ -19,6 +19,12 @@ impl Point {
     }
 }
 
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({:.6}, {:.6})", self.x, self.y)
+    }
+}
+
 /// Represents the angle span of a circular arc.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum AngleSpan {

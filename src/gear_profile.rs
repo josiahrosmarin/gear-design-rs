@@ -1,5 +1,5 @@
 use crate::{
-    error::{GearDesignError, GearError},
+    error::{GearDesignError, GearProfileError},
     geometry::{fit_arc, CircularArc, Point},
 };
 use std::f64::consts::PI;
@@ -65,25 +65,25 @@ impl GearProfile {
         teeth: u32,
         module: f64,
         pressure_angle: f64,
-    ) -> Result<GearProfile, GearError> {
+    ) -> Result<GearProfile, GearProfileError> {
         // Validation checks
         if pressure_angle < MINIMUM_PRESSURE_ANGLE || pressure_angle > MAXIMUM_PRESSURE_ANGLE {
-            return Err(GearError::InvalidPressureAngle);
+            return Err(GearProfileError::InvalidPressureAngle);
         }
 
         let teeth_f64 = teeth as f64;
-        let circular_thickness = module * PI / 2.0;
+        let circular_thickness = 0.5 * module * PI;
         let pitch_diameter = teeth_f64 * module;
         let base_diameter = pitch_diameter * pressure_angle.to_radians().cos();
         let form_diameter = base_diameter;
         let involute_end_diameter = pitch_diameter + (2.0 * module);
 
         if base_diameter > form_diameter {
-            return Err(GearError::InvalidFormDiameter);
+            return Err(GearProfileError::InvalidFormDiameter);
         }
 
         if involute_end_diameter < pitch_diameter {
-            return Err(GearError::InvalidInvoluteEndDiameter);
+            return Err(GearProfileError::InvalidInvoluteEndDiameter);
         }
 
         Ok(GearProfile {
@@ -96,21 +96,35 @@ impl GearProfile {
         })
     }
 
-    pub fn set_circular_thickness(&mut self, circular_thickness: f64) -> Result<(), GearError> {
+    pub fn from_base_diameter(
+        teeth: u32,
+        module: f64,
+        base_diameter: f64,
+    ) -> Result<GearProfile, GearProfileError> {
+        // Validation checks
+        let pitch_diameter = teeth as f64 * module;
+        let pressure_angle = (base_diameter / pitch_diameter).acos().to_degrees();
+        Self::from_basic_params(teeth, module, pressure_angle)
+    }
+
+    pub fn set_circular_thickness(
+        &mut self,
+        circular_thickness: f64,
+    ) -> Result<(), GearProfileError> {
         if circular_thickness < 0.0 || self.circular_pitch() < circular_thickness {
-            return Err(GearError::InvalidCircularThickness);
+            return Err(GearProfileError::InvalidCircularThickness);
         }
         if check_involute_self_interference(self, circular_thickness, self.involute_end_diameter) {
             self.circular_thickness = circular_thickness;
             Ok(())
         } else {
-            Err(GearError::InvalidCircularThickness)
+            Err(GearProfileError::InvalidCircularThickness)
         }
     }
 
-    pub fn set_form_diameter(&mut self, form_diameter: f64) -> Result<(), GearError> {
+    pub fn set_form_diameter(&mut self, form_diameter: f64) -> Result<(), GearProfileError> {
         if form_diameter < self.base_diameter {
-            return Err(GearError::InvalidFormDiameter);
+            return Err(GearProfileError::InvalidFormDiameter);
         }
         self.form_diameter = form_diameter;
         Ok(())
@@ -119,12 +133,13 @@ impl GearProfile {
     pub fn set_involute_end_diameter(
         &mut self,
         involute_end_diameter: f64,
-    ) -> Result<(), GearError> {
+    ) -> Result<(), GearProfileError> {
+        println!("set_involute_end_diameter({:.6})", involute_end_diameter);
         if check_involute_self_interference(self, self.circular_thickness, involute_end_diameter) {
             self.involute_end_diameter = involute_end_diameter;
             Ok(())
         } else {
-            Err(GearError::InvalidInvoluteEndDiameter)
+            Err(GearProfileError::InvalidInvoluteEndDiameter)
         }
     }
 
@@ -173,6 +188,12 @@ impl GearProfile {
         PI * self.base_diameter / self.teeth as f64
     }
 
+    pub fn pressure_angle(&self) -> f64 {
+        (self.base_diameter() / self.pitch_diameter())
+            .acos()
+            .to_degrees()
+    }
+
     /// Calculates the roll angle offset required to achieve the gear's circular thickness.
     ///
     /// The roll angle offset is the shift in the roll angle of the involute to produce the desired
@@ -181,8 +202,8 @@ impl GearProfile {
     /// # Returns
     ///
     /// The roll angle offset in radians.
-    pub fn roll_angle_offset(&self) -> Result<f64, GearError> {
-        roll_angle_offset(
+    pub fn offset_angle(&self) -> Result<f64, GearProfileError> {
+        offset_angle(
             self.base_diameter(),
             self.pitch_diameter(),
             self.circular_thickness,
@@ -201,23 +222,166 @@ impl GearProfile {
     ///
     /// # Returns
     ///
-    /// A `Result<f64, GearError>` containing the tooth thickness (in the same units as the module)
+    /// A `Result<f64, GearProfileError>` containing the tooth thickness (in the same units as the module)
     /// or an error if the `evaluated_diameter` is invalid.
     ///
     /// # Errors
     ///
-    /// Returns a `GearError::InvalidInvoluteDiameter` if the `evaluated_diameter` is less than the base diameter.
-    pub fn thickness_at_diameter(&self, evaluated_diameter: f64) -> Result<f64, GearError> {
-        let offset_angle = self.roll_angle_offset()?;
-        let roll_angle = roll_angle_at_diameter(self.base_diameter(), evaluated_diameter)?;
-        let thickness_angle = offset_angle - roll_angle;
+    /// Returns a `GearProfileError::InvalidInvoluteDiameter` if the `evaluated_diameter` is less than the base diameter.
+    pub fn thickness_at_diameter(&self, evaluated_diameter: f64) -> Result<f64, GearProfileError> {
+        let base_diameter = self.base_diameter();
+        let offset_angle = self.offset_angle()?;
+        let roll_angle = roll_angle_at_diameter(base_diameter, evaluated_diameter)?;
+        let point = involute(base_diameter, roll_angle, 0.0);
+        let angle = point.angle();
+
+        let thickness_angle = offset_angle - angle;
         Ok(thickness_angle * evaluated_diameter)
     }
 
-    pub fn shifted_solidworks_equations(&self, tooth_shift: f64) -> Result<(), GearError> {
-        let shift = tooth_shift * PI / self.teeth as f64;
+    pub fn apply_tip_radius(
+        &mut self,
+        outer_diameter: f64,
+        tip_radius: f64,
+    ) -> Result<CircularArc, GearProfileError> {
+        let base_diameter = self.base_diameter();
+        let base_radius = base_diameter / 2.0;
+
+        let radius_of_tip_fillet_center = outer_diameter / 2.0 - tip_radius;
+        let term_under_sqrt =
+            radius_of_tip_fillet_center * radius_of_tip_fillet_center - base_radius * base_radius;
+
+        let roll_angle = if term_under_sqrt >= 0.0 {
+            (tip_radius + term_under_sqrt.sqrt()) / base_radius
+        } else {
+            return Err(GearProfileError::InvalidTipRadius);
+        };
+
+        let involute_end_point = involute(base_diameter, roll_angle, 0.0);
+        let involute_end_radius = involute_end_point.radius();
+
+        let dx = tip_radius * roll_angle.sin();
+        let dy = -tip_radius * roll_angle.cos();
+
+        let tip_radius_center = Point {
+            x: involute_end_point.x - dx,
+            y: involute_end_point.y - dy,
+        };
+        let tip_radius_angle = tip_radius_center.angle();
+        if tip_radius_angle > self.offset_angle()? {
+            return Err(GearProfileError::InvalidTipRadius);
+        }
+
+        self.set_involute_end_diameter(involute_end_radius * 2.0)?;
+
+        let tip_arc = CircularArc::new(
+            tip_radius_center,
+            tip_radius,
+            dy.atan2(dx),
+            tip_radius_center.angle(),
+        );
+        Ok(tip_arc)
+    }
+
+    pub fn full_root_fillet(&self) -> Result<CircularArc, GearProfileError> {
+        // Polar angle allotted to root radius
+
+        let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
+        let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
+
+        let radius_polar_allotment = self.offset_angle()? - PI / self.teeth as f64;
+
+        let root_radius = (involute_point.y * radius_polar_allotment.cos()
+            - involute_point.x * radius_polar_allotment.sin())
+            / (roll_angle - radius_polar_allotment).cos();
+
+        let dx = -root_radius * roll_angle.sin();
+        let dy = root_radius * roll_angle.cos();
+
+        let root_radius_center = Point {
+            x: involute_point.x - dx,
+            y: involute_point.y - dy,
+        };
+
+        let root_arc = CircularArc::new(
+            root_radius_center,
+            root_radius,
+            dy.atan2(dx),
+            PI + root_radius_center.angle(),
+        );
+        Ok(root_arc)
+    }
+    pub fn root_radius(&self, radius: f64) -> Result<(f64, CircularArc), GearProfileError> {
+        let max_radius = self.full_root_fillet()?.radius;
+        if radius > max_radius {
+            return Err(GearProfileError::InvalidRootRadius);
+        }
+        let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
+        let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
+        let dx = -radius * roll_angle.sin();
+        let dy = radius * roll_angle.cos();
+
+        let root_radius_center = Point {
+            x: involute_point.x - dx,
+            y: involute_point.y - dy,
+        };
+        let root_arc = CircularArc::new(
+            root_radius_center,
+            radius,
+            dy.atan2(dx),
+            PI + root_radius_center.angle(),
+        );
+        let root_radius = root_radius_center.radius() - radius;
+
+        let root_diameter = 2.0 * root_radius;
+        Ok((root_diameter, root_arc))
+    }
+
+    pub fn root_radius_at_root_diameter(
+        &self,
+        root_diameter: f64,
+    ) -> Result<(f64, CircularArc), GearProfileError> {
+        println!("\n");
+        println!("root_diameter: {}", root_diameter);
+        println!("self.base_diameter(): {:.6}", self.base_diameter());
+        println!("self.form_diameter(): {:.6}", self.form_diameter());
+        let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
+        println!("roll_angle: {:.6}", roll_angle);
+        let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
+        println!("involute_point: {}", involute_point);
+        let xi = involute_point.x;
+        let yi = involute_point.y;
+
+        let r = root_diameter / 2.0;
+        let numerator = r * r - (xi * xi + yi * yi);
+        let denominator = 2.0 * (xi * roll_angle.sin() - yi * roll_angle.cos() - r);
+
+        if denominator == 0.0 {
+            return Err(GearProfileError::InvalidRootRadius);
+        }
+
+        let root_radius = numerator / denominator;
+
+        let dx = -root_radius * roll_angle.sin();
+        let dy = root_radius * roll_angle.cos();
+        let root_radius_center = Point {
+            x: involute_point.x - dx,
+            y: involute_point.y - dy,
+        };
+
+        let root_arc = CircularArc::new(
+            root_radius_center,
+            root_radius,
+            dy.atan2(dx),
+            PI + root_radius_center.angle(),
+        );
+        Ok((root_radius, root_arc))
+    }
+
+    pub fn shifted_solidworks_equations(&self, tooth_shift: f64) -> Result<(), GearProfileError> {
+        let shift = 2.0 * tooth_shift * PI / self.teeth as f64;
         let base_radius = self.base_diameter / 2.0;
-        let offset = -self.roll_angle_offset()?;
+        let offset = -self.offset_angle()?;
         println!("{}t - {:.2}m", self.teeth, self.module);
         println!(
             "{:.6} * ( cos(t{:+.6}) + t*sin(t{:+.6}) )",
@@ -243,6 +407,12 @@ impl GearProfile {
             base_radius,
             offset - shift,
             offset - shift
+        );
+
+        println!(
+            "Roll angle: {:.6} to {:.6}",
+            roll_angle_at_diameter(self.base_diameter(), self.form_diameter()).unwrap(),
+            roll_angle_at_diameter(self.base_diameter(), self.involute_end_diameter()).unwrap(),
         );
         Ok(())
     }
@@ -276,12 +446,16 @@ fn involute(base_diameter: f64, roll_angle: f64, offset_angle: f64) -> Point {
 ///
 /// # Returns
 ///
-/// A `Result<f64, GearError>` containing the roll angle or an error message.
-fn roll_angle_at_diameter(base_diameter: f64, evaluated_diameter: f64) -> Result<f64, GearError> {
+/// A `Result<f64, GearProfileError>` containing the roll angle or an error message.
+pub fn roll_angle_at_diameter(
+    base_diameter: f64,
+    evaluated_diameter: f64,
+) -> Result<f64, GearProfileError> {
     if evaluated_diameter < base_diameter {
-        return Err(GearError::InvalidInvoluteDiameter);
+        return Err(GearProfileError::InvalidInvoluteDiameter);
     }
     let diameter_ratio = evaluated_diameter / base_diameter;
+
     Ok((diameter_ratio * diameter_ratio - 1.0).sqrt())
 }
 
@@ -310,33 +484,42 @@ fn check_involute_self_interference(
     circular_thickness: f64,
     involute_end_diameter: f64,
 ) -> bool {
-    let roll_angle = match roll_angle_offset(
+    let roll_angle_at_end_diameter = match offset_angle(
         profile.base_diameter(),
-        profile.pitch_diameter(),
+        involute_end_diameter,
         circular_thickness,
     ) {
         Ok(angle) => angle,
         Err(_) => return false,
     };
 
-    let involute_intersection = involute(profile.base_diameter(), roll_angle, 0.0);
-    let max_non_interfering_diameter = involute_intersection.radius() * 2.0;
+    let involute_end_diameter_polar =
+        involute(profile.base_diameter(), roll_angle_at_end_diameter, 0.0).angle();
 
-    involute_end_diameter < max_non_interfering_diameter
+    match offset_angle(
+        profile.base_diameter(),
+        profile.pitch_diameter(),
+        profile.circular_thickness(),
+    ) {
+        Ok(angle) => involute_end_diameter_polar < angle,
+        _ => false,
+    }
 }
 
-fn roll_angle_offset(
+fn offset_angle(
     base_diameter: f64,
     reference_diameter: f64,
     reference_thickness: f64,
-) -> Result<f64, GearError> {
-    let roll_angle_reference = roll_angle_at_diameter(base_diameter, reference_diameter)?;
+) -> Result<f64, GearProfileError> {
+    let roll_angle = roll_angle_at_diameter(base_diameter, reference_diameter)?;
+
+    let base_to_pitch_polar = involute(base_diameter, roll_angle, 0.0).angle();
     // Calculate the angle subtended by half the tooth thickness at the reference circle
     let half_thickness_angle = reference_thickness / reference_diameter;
 
     // The roll angle offset is the difference between the involute angle at the pitch circle
     // and half the tooth angle.
-    Ok(roll_angle_reference - half_thickness_angle)
+    Ok(base_to_pitch_polar + half_thickness_angle)
 }
 
 /// Approximates the involute curve of a gear profile using circular arcs.
@@ -361,7 +544,7 @@ pub fn approximate_involute(
 
     let double_annulus = involute_end_diameter - form_diameter;
 
-    let involute_point = |test_diameter: f64| -> Result<Point, GearError> {
+    let involute_point = |test_diameter: f64| -> Result<Point, GearProfileError> {
         let roll_angle = roll_angle_at_diameter(base_diameter, test_diameter)?;
         Ok(involute(base_diameter, roll_angle, 0.0))
     };
@@ -390,17 +573,17 @@ pub fn approximate_involute(
             let index = segment * 2;
 
             let test_diameter_0 = *diameters.get(index + 0).ok_or(GearDesignError::Gear(
-                GearError::InvoluteApproximationFailed,
+                GearProfileError::InvoluteApproximationFailed,
             ))?;
             let vertex_0 = involute_point(test_diameter_0)?;
 
             let test_diameter_1 = *diameters.get(index + 1).ok_or(GearDesignError::Gear(
-                GearError::InvoluteApproximationFailed,
+                GearProfileError::InvoluteApproximationFailed,
             ))?;
             let vertex_1 = involute_point(test_diameter_1)?;
 
             let test_diameter_2 = *diameters.get(index + 2).ok_or(GearDesignError::Gear(
-                GearError::InvoluteApproximationFailed,
+                GearProfileError::InvoluteApproximationFailed,
             ))?;
             let vertex_2 = involute_point(test_diameter_2)?;
 
@@ -420,6 +603,58 @@ pub fn approximate_involute(
         return Ok(arcs);
     }
     return Err(GearDesignError::Gear(
-        GearError::InvoluteApproximationFailed,
+        GearProfileError::InvoluteApproximationFailed,
     ));
+}
+
+/// Calculates the outer diameter of a gear tooth at the involute end
+/// given the base diameter, tip radius, and outer diameter.
+///
+/// This function determines the roll angle required to achieve the specified
+/// tip radius based on the base diameter and outer diameter, and then
+/// calculates the diameter at the end of the involute curve.
+///
+/// # Arguments
+///
+/// * `base_diameter`: The diameter of the base circle.
+/// * `outer_diameter`: The outer diameter of the gear.
+/// * `tip_radius`: The radius of the tip of the gear tooth.
+///
+/// # Returns
+///
+/// An `Option<f64>` representing the outer diameter at the involute end.
+/// Returns `None` if no real solution for the roll angle exists based on the input parameters.
+fn involute_end_for_tip_radius(
+    base_diameter: f64,
+    outer_diameter: f64,
+    tip_radius: f64,
+) -> Option<f64> {
+    let base_radius = base_diameter / 2.0;
+
+    let radius_of_tip_fillet_center = outer_diameter / 2.0 - tip_radius;
+    let roll_angle = (tip_radius
+        + (radius_of_tip_fillet_center * radius_of_tip_fillet_center - base_radius * base_radius)
+            .sqrt())
+        / base_radius;
+    let involute_end_point = involute(base_diameter, roll_angle, 0.0);
+    let involute_end_radius = involute_end_point.radius();
+
+    println!("involute_end_radius: {}", involute_end_radius);
+    // let evaluated_diameter = 13.4485 * 2.0;
+    // let roll_angle = roll_angle_at_diameter(base_diameter, evaluated_diameter).unwrap();
+    // let r0 = solve_for_r0(base_diameter, outer_diameter, roll_angle)?;
+    // println!("r0: {:.6}", r0);
+
+    // let term_under_sqrt = (tip_radius * (base_diameter - outer_diameter)
+    //     + (outer_diameter * outer_diameter) / 4.0)
+    //     / (base_radius * base_radius)
+    //     - 1.0;
+
+    // if term_under_sqrt < 0.0 {
+    //     return None;
+    // }
+    // let roll_angle = term_under_sqrt.sqrt();
+    // let involute_end_point = involute(base_diameter, roll_angle, 0.0);
+
+    Some(involute_end_radius * 2.0)
 }

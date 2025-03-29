@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// Represents errors that can occur in the gear library.
 #[derive(Error, Debug, PartialEq)]
-pub enum GearError {
+pub enum GearProfileError {
     /// Indicates that the pressure angle is out of the valid range.
     #[error("Pressure angle must be between 0 and 90 degrees.")]
     InvalidPressureAngle,
@@ -30,6 +30,14 @@ pub enum GearError {
     /// Indicates that the involute approximation process failed to converge.
     #[error("Involute approximation failed to converge within the allowed number of iterations.")]
     InvoluteApproximationFailed,
+
+    /// Docstring
+    #[error("message")]
+    InvalidTipRadius,
+
+    /// Docstring
+    #[error("InvalidRootRadius")]
+    InvalidRootRadius,
 }
 
 /// Represents errors that can occur in the geometry library.
@@ -56,9 +64,12 @@ pub enum GearMeshError {
 }
 
 #[derive(Error, Debug, PartialEq)]
+pub enum SpurGearProfileError {}
+
+#[derive(Error, Debug, PartialEq)]
 pub enum GearDesignError {
     #[error(transparent)]
-    Gear(#[from] GearError),
+    Gear(#[from] GearProfileError),
     #[error(transparent)]
     Geometry(#[from] GeometryError),
     #[error(transparent)]

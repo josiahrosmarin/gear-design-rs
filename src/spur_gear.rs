@@ -1,4 +1,4 @@
-use crate::gear_profile::GearProfile;
+use crate::{error::SpurGearProfileError, gear_profile::GearProfile};
 
 #[cfg(feature = "tip-relief")]
 /// Represents the parameters for tip relief.
@@ -61,11 +61,11 @@ pub struct TrochoidParams {
 }
 
 /// Represents the various forms of root radius.
-pub enum RootRadius {
+pub enum RootFillet {
     /// A full radius at the root.
     ///
     /// Represents a root with a complete circular arc.
-    Full(f64),
+    Full,
 
     /// A partial radius that terminates into the bottom land.
     ///
@@ -92,8 +92,8 @@ pub struct Gear {
 
     /// The root radius of the gear teeth.
     ///
-    /// This field defines the shape of the root of the tooth, using the `RootRadius` enum.
-    pub root_radius: RootRadius,
+    /// This field defines the shape of the root of the tooth, using the `RootFillet` enum.
+    pub root_radius: RootFillet,
 
     /// The tip of the gear teeth.
     ///

@@ -1,5 +1,5 @@
 use crate::{
-    error::{GearError, GearMeshError},
+    error::{GearMeshError, GearProfileError},
     gear_profile::GearProfile,
     geometry::Point,
     spur_gear::Gear, // Import the Gear struct
@@ -103,8 +103,8 @@ impl<'a> GearMesh<'a> {
     ///
     /// # Returns
     ///
-    ///   A Result containing the contact ratio or a GearError if the calculation fails.
-    pub fn contact_ratio(&self, center_distance: f64) -> Result<f64, GearError> {
+    ///   A Result containing the contact ratio or a GearProfileError if the calculation fails.
+    pub fn contact_ratio(&self, center_distance: f64) -> Result<f64, GearProfileError> {
         let pressure_angle = self.operating_pressure_angle(center_distance);
 
         let od = self.pinion.involute_end_diameter();
@@ -133,8 +133,8 @@ impl<'a> GearMesh<'a> {
     ///
     /// # Returns
     ///
-    ///   A Result containing the backlash value or a GearError if the calculation fails.
-    pub fn backlash(&self, center_distance: f64) -> Result<f64, GearError> {
+    ///   A Result containing the backlash value or a GearProfileError if the calculation fails.
+    pub fn backlash(&self, center_distance: f64) -> Result<f64, GearProfileError> {
         // Implementation of backlash calculation...
         Ok(0.0) // Placeholder
     }
@@ -151,8 +151,8 @@ impl<'a> GearMesh<'a> {
     /// # Returns
     ///
     ///   A Result containing `true` if interference is detected, `false` otherwise,
-    ///   or a GearError if the check fails.
-    pub fn check_interference(&self, center_distance: f64) -> Result<bool, GearError> {
+    ///   or a GearProfileError if the check fails.
+    pub fn check_interference(&self, center_distance: f64) -> Result<bool, GearProfileError> {
         // Implementation of interference check...
         Ok(false) // Placeholder
     }
@@ -168,8 +168,8 @@ impl<'a> GearMesh<'a> {
     ///
     /// # Returns
     ///
-    ///   A Result containing the output torque or a GearError if the calculation fails.
-    pub fn torque(&self, input_torque: f64) -> Result<f64, GearError> {
+    ///   A Result containing the output torque or a GearProfileError if the calculation fails.
+    pub fn torque(&self, input_torque: f64) -> Result<f64, GearProfileError> {
         // Implementation of torque calculation...
         Ok(input_torque) // Placeholder
     }
