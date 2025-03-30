@@ -1,6 +1,6 @@
 use crate::{
     error::{GearDesignError, GearProfileError},
-    geometry::{fit_arc, CircularArc, Point},
+    geometry::{fit_arc, CircularArc, Point, Vector},
 };
 use std::f64::consts::PI;
 
@@ -260,15 +260,10 @@ impl GearProfile {
         let involute_end_point = involute(base_diameter, roll_angle, 0.0);
         let involute_end_radius = involute_end_point.radius();
 
-        let dx = tip_radius * roll_angle.sin();
-        let dy = -tip_radius * roll_angle.cos();
+        let v = Vector::from_angle_and_radius(roll_angle - PI / 2.0, tip_radius);
+        let tip_radius_center = &involute_end_point - &v;
 
-        let tip_radius_center = Point {
-            x: involute_end_point.x - dx,
-            y: involute_end_point.y - dy,
-        };
-        let tip_radius_angle = tip_radius_center.angle();
-        if tip_radius_angle > self.offset_angle()? {
+        if tip_radius_center.angle() > self.offset_angle()? {
             return Err(GearProfileError::InvalidTipRadius);
         }
 
@@ -277,7 +272,7 @@ impl GearProfile {
         let tip_arc = CircularArc::new(
             tip_radius_center,
             tip_radius,
-            dy.atan2(dx),
+            v.angle(),
             tip_radius_center.angle(),
         );
         Ok(tip_arc)
@@ -291,25 +286,19 @@ impl GearProfile {
 
         let radius_polar_allotment = self.offset_angle()? - PI / self.teeth as f64;
 
-        let root_radius = (involute_point.y * radius_polar_allotment.cos()
+        let root_fillet_radius = (involute_point.y * radius_polar_allotment.cos()
             - involute_point.x * radius_polar_allotment.sin())
             / (roll_angle - radius_polar_allotment).cos();
 
-        let dx = -root_radius * roll_angle.sin();
-        let dy = root_radius * roll_angle.cos();
+        let v = Vector::from_angle_and_radius(roll_angle - PI / 2.0, root_fillet_radius);
+        let root_fillet_center = &involute_point - &v;
 
-        let root_radius_center = Point {
-            x: involute_point.x - dx,
-            y: involute_point.y - dy,
-        };
-
-        let root_arc = CircularArc::new(
-            root_radius_center,
-            root_radius,
-            dy.atan2(dx),
-            PI + root_radius_center.angle(),
-        );
-        Ok(root_arc)
+        Ok(CircularArc::new(
+            root_fillet_center,
+            root_fillet_radius,
+            v.angle(),
+            PI + root_fillet_center.angle(),
+        ))
     }
     pub fn root_fillet_radius(
         &self,
@@ -321,23 +310,16 @@ impl GearProfile {
         }
         let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
         let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
-        let dx = -root_fillet_radius * roll_angle.sin();
-        let dy = root_fillet_radius * roll_angle.cos();
 
-        let root_radius_center = Point {
-            x: involute_point.x - dx,
-            y: involute_point.y - dy,
-        };
-        let arc = CircularArc::new(
-            root_radius_center,
+        let v = Vector::from_angle_and_radius(roll_angle - PI / 2.0, root_fillet_radius);
+        let root_fillet_center = &involute_point - &v;
+
+        Ok(CircularArc::new(
+            root_fillet_center,
             root_fillet_radius,
-            dy.atan2(dx),
-            PI + root_radius_center.angle(),
-        );
-        let root_radius = root_radius_center.radius() - root_fillet_radius;
-
-        let root_diameter = 2.0 * root_radius;
-        Ok(arc)
+            v.angle(),
+            PI + root_fillet_center.angle(),
+        ))
     }
 
     pub fn root_radius_at_root_diameter(

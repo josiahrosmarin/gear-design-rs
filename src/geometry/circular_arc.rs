@@ -1,114 +1,6 @@
 use std::{f64::consts::PI, fmt};
 
-use crate::error::GeometryError;
-
-/// Represents a point in 2D space.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
-}
-pub struct Vector {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Point {
-    pub fn radius(&self) -> f64 {
-        (self.x * self.x + self.y * self.y).sqrt()
-    }
-
-    pub fn angle(&self) -> f64 {
-        self.y.atan2(self.x)
-    }
-}
-
-impl fmt::Display for Point {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({:.6}, {:.6})", self.x, self.y)
-    }
-}
-
-impl std::ops::Sub for Point {
-    type Output = Vector;
-
-    fn sub(self, other: Self) -> Self::Output {
-        Vector {
-            x: self.x - other.x,
-            y: self.y - other.y,
-        }
-    }
-}
-
-impl std::ops::Add<Vector> for Point {
-    type Output = Self;
-
-    fn add(self, vector: Vector) -> Self::Output {
-        Point {
-            x: self.x + vector.x,
-            y: self.y + vector.y,
-        }
-    }
-}
-
-impl std::ops::Sub for Vector {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self::Output {
-        Vector {
-            x: self.x - other.x,
-            y: self.y - other.y,
-        }
-    }
-}
-
-impl std::ops::Sub<Vector> for Point {
-    type Output = Self;
-
-    fn sub(self, vector: Vector) -> Self::Output {
-        Point {
-            x: self.x - vector.x,
-            y: self.y - vector.y,
-        }
-    }
-}
-
-impl Vector {
-    pub fn from_angle_and_radius(angle: f64, radius: f64) -> Self {
-        Vector {
-            x: radius * angle.cos(),
-            y: radius * angle.sin(),
-        }
-    }
-}
-
-/// Represents the angle span of a circular arc.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum AngleSpan {
-    Arc { start: f64, end: f64 },
-    FullCircle,
-}
-
-impl AngleSpan {
-    fn as_arc(&self) -> Option<(&f64, &f64)> {
-        match self {
-            AngleSpan::Arc { start, end } => Some((start, end)),
-            AngleSpan::FullCircle => None,
-        }
-    }
-}
-impl fmt::Display for AngleSpan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AngleSpan::Arc { start, end } => {
-                let start_deg = start * 180.0 / PI;
-                let end_deg = end * 180.0 / PI;
-                write!(f, "Arc({:.3}° to {:.3}°) ", start_deg, end_deg)
-            }
-            AngleSpan::FullCircle => write!(f, "FullCircle"),
-        }
-    }
-}
+use super::{Point, Vector};
 
 /// Represents a circular arc.
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -167,69 +59,68 @@ impl CircularArc {
         };
 
         return Some([
-            self.center + Vector::from_angle_and_radius(start, self.radius),
-            self.center + Vector::from_angle_and_radius(end, self.radius),
+            &self.center + &Vector::from_angle_and_radius(start, self.radius),
+            &self.center + &Vector::from_angle_and_radius(end, self.radius),
         ]);
+    }
+
+    pub fn svg_arc_params(&self) -> Option<CircularArcSvgParams> {
+        let (start_angle, end_angle) = match self.angle_span {
+            AngleSpan::FullCircle => return None,
+            AngleSpan::Arc { start, end } => (start, end),
+        };
+
+        let start_point = &self.center + &Vector::from_angle_and_radius(start_angle, self.radius);
+        let end_point = &self.center + &Vector::from_angle_and_radius(end_angle, self.radius);
+
+        let delta = end_angle - start_angle;
+        let large_arc_flag = delta.abs() > std::f64::consts::PI;
+        let sweep_flag = end_angle > start_angle;
+
+        Some(CircularArcSvgParams {
+            start: start_point,
+            large_arc_flag,
+            sweep_flag,
+            end: end_point,
+            radius: self.radius,
+        })
     }
 }
 
-/// Calculates the center and radius of a circle that passes through three points.
-///
-/// # Parameters
-///
-/// * `p1`: The first point.
-/// * `p2`: The second point.
-/// * `p3`: The third point.
-///
-/// # Returns
-///
-/// A `CircularArc` representing the circle that passes through the three points.
-pub fn fit_arc(
-    boundary_points: [&Point; 2],
-    interior_point: &Point,
-) -> Result<CircularArc, GeometryError> {
-    let b0_x = boundary_points[0].x;
-    let b0_y = boundary_points[0].y;
-    let i_x = interior_point.x;
-    let i_y = interior_point.y;
-    let b1_x = boundary_points[1].x;
-    let b1_y = boundary_points[1].y;
+/// Represents the angle span of a circular arc.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum AngleSpan {
+    Arc { start: f64, end: f64 },
+    FullCircle,
+}
 
-    let cross_product = b0_x * (i_y - b1_y) - b0_y * (i_x - b1_x) + i_x * b1_y - b1_x * i_y;
-
-    if cross_product == 0.0 {
-        return Err(GeometryError::CollinearPoints);
+impl AngleSpan {
+    fn as_arc(&self) -> Option<(&f64, &f64)> {
+        match self {
+            AngleSpan::Arc { start, end } => Some((start, end)),
+            AngleSpan::FullCircle => None,
+        }
     }
-
-    let center_x_determinant = (b0_x * b0_x + b0_y * b0_y) * (b1_y - i_y)
-        + (i_x * i_x + i_y * i_y) * (b0_y - b1_y)
-        + (b1_x * b1_x + b1_y * b1_y) * (i_y - b0_y);
-    let center_y_determinant = (b0_x * b0_x + b0_y * b0_y) * (i_x - b1_x)
-        + (i_x * i_x + i_y * i_y) * (b1_x - b0_x)
-        + (b1_x * b1_x + b1_y * b1_y) * (b0_x - i_x);
-
-    let center = Point {
-        x: -center_x_determinant / (2.0 * cross_product),
-        y: -center_y_determinant / (2.0 * cross_product),
-    };
-
-    let radius =
-        ((b0_x - center.x) * (b0_x - center.x) + (b0_y - center.y) * (b0_y - center.y)).sqrt();
-
-    let b0_theta = (b0_y - center.y).atan2(b0_x - center.x);
-    let b1_theta = (b1_y - center.y).atan2(b1_x - center.x);
-
-    let arc = CircularArc::new(center, radius, b0_theta, b1_theta);
-    if arc.contains_point(interior_point, 1e-6) {
-        return Ok(arc);
+}
+impl fmt::Display for AngleSpan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AngleSpan::Arc { start, end } => {
+                let start_deg = start * 180.0 / PI;
+                let end_deg = end * 180.0 / PI;
+                write!(f, "Arc({:.3}° to {:.3}°) ", start_deg, end_deg)
+            }
+            AngleSpan::FullCircle => write!(f, "FullCircle"),
+        }
     }
+}
 
-    let arc = CircularArc::new(center, radius, b1_theta, b0_theta);
-    if arc.contains_point(interior_point, 1e-6) {
-        return Ok(arc);
-    }
-
-    Err(GeometryError::InteriorPointNotOnArc)
+pub struct CircularArcSvgParams {
+    pub start: Point,
+    pub large_arc_flag: bool,
+    pub sweep_flag: bool,
+    pub end: Point,
+    pub radius: f64,
 }
 
 #[cfg(test)]
@@ -487,143 +378,5 @@ mod tests {
             1e-6
         ));
         assert!(arc.contains_point(&Point { x: 0.0, y: 0.0 }, 1.0)); //center
-    }
-
-    #[test]
-    fn test_fit_arc_non_collinear() {
-        let p1 = Point { x: 1.0, y: 0.0 };
-        let p2 = Point { x: -1.0, y: 0.0 };
-        let p3 = Point { x: 0.0, y: 1.0 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert_eq!(arc.center, Point { x: 0.0, y: 0.0 });
-        assert_eq!(arc.radius, 1.0);
-
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 0.0).abs() < 1e-6);
-            assert!((end - PI).abs() < 1e-6);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-    #[test]
-    fn test_fit_arc_non_collinear_2() {
-        let p1 = Point { x: 2.0, y: 0.0 };
-        let p2 = Point { x: -2.0, y: 0.0 };
-        let p3 = Point { x: 0.0, y: 2.0 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert_eq!(arc.center, Point { x: 0.0, y: 0.0 });
-        assert_eq!(arc.radius, 2.0);
-
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 0.0).abs() < 1e-6);
-            assert!((end - PI).abs() < 1e-6);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
-    fn test_fit_arc_collinear_horizontal() {
-        let p1 = Point { x: 1.0, y: 1.0 };
-        let p2 = Point { x: 2.0, y: 1.0 };
-        let p3 = Point { x: 3.0, y: 1.0 };
-
-        let arc = fit_arc([&p1, &p2], &p3);
-
-        assert_eq!(arc, Err(GeometryError::CollinearPoints));
-    }
-
-    #[test]
-    fn test_fit_arc_tiny_arc() {
-        let p1 = Point { x: 1.0, y: 1.0 };
-        let p2 = Point {
-            x: 1.000001,
-            y: 1.000002,
-        };
-        let p3 = Point {
-            x: 1.000002,
-            y: 1.000001,
-        };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert!(arc.radius > 1e6); // Expect a large radius for a tiny arc
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((end - start).abs() < 1e-5); // Expect a small angle difference
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
-    fn test_fit_arc_large_arc() {
-        let p1 = Point { x: 1000.0, y: 0.0 };
-        let p2 = Point { x: 0.0, y: 1000.0 };
-        let p3 = Point { x: -1000.0, y: 0.0 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert_eq!(arc.radius, 1000.0);
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 0.0).abs() < 1e-6);
-            assert!((end - PI).abs() < 1e-6);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
-    fn test_fit_arc_unusual_angles() {
-        let p1 = Point { x: 1.0, y: 1.0 };
-        let p2 = Point { x: 2.0, y: 3.0 };
-        let p3 = Point { x: 3.0, y: 1.5 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 1.0_f64.atan2(1.0)).abs() < 1e-6);
-            assert!((end - 1.5_f64.atan2(3.0)).abs() < 1e-6);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
-    fn test_fit_arc_near_collinear() {
-        let p1 = Point { x: 1.0, y: 1.0 };
-        let p2 = Point {
-            x: 2.0,
-            y: 2.000001,
-        };
-        let p3 = Point { x: 3.0, y: 3.0 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert!(arc.radius > 1e6);
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((end - start).abs() < 1e-5);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
-    fn test_fit_arc_negative_coordinates() {
-        let p1 = Point { x: -1.0, y: -1.0 };
-        let p2 = Point { x: -2.0, y: -3.0 };
-        let p3 = Point { x: -3.0, y: -1.5 };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - (-3.0 * PI / 4.0)).abs() < 1e-6);
-            assert!((end - (-PI + 1.5_f64.atan2(3.0))).abs() < 1e-6);
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
     }
 }
