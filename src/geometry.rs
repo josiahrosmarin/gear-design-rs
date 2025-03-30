@@ -8,6 +8,10 @@ pub struct Point {
     pub x: f64,
     pub y: f64,
 }
+pub struct Vector {
+    pub x: f64,
+    pub y: f64,
+}
 
 impl Point {
     pub fn radius(&self) -> f64 {
@@ -22,6 +26,59 @@ impl Point {
 impl fmt::Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({:.6}, {:.6})", self.x, self.y)
+    }
+}
+
+impl std::ops::Sub for Point {
+    type Output = Vector;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Vector {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl std::ops::Add<Vector> for Point {
+    type Output = Self;
+
+    fn add(self, vector: Vector) -> Self::Output {
+        Point {
+            x: self.x + vector.x,
+            y: self.y + vector.y,
+        }
+    }
+}
+
+impl std::ops::Sub for Vector {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Vector {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl std::ops::Sub<Vector> for Point {
+    type Output = Self;
+
+    fn sub(self, vector: Vector) -> Self::Output {
+        Point {
+            x: self.x - vector.x,
+            y: self.y - vector.y,
+        }
+    }
+}
+
+impl Vector {
+    pub fn from_angle_and_radius(angle: f64, radius: f64) -> Self {
+        Vector {
+            x: radius * angle.cos(),
+            y: radius * angle.sin(),
+        }
     }
 }
 
@@ -101,6 +158,18 @@ impl CircularArc {
             }
             AngleSpan::FullCircle => true,
         }
+    }
+
+    pub fn end_points(&self) -> Option<[Point; 2]> {
+        let (start, end) = match self.angle_span {
+            AngleSpan::FullCircle => return None,
+            AngleSpan::Arc { start, end } => (start, end),
+        };
+
+        return Some([
+            self.center + Vector::from_angle_and_radius(start, self.radius),
+            self.center + Vector::from_angle_and_radius(end, self.radius),
+        ]);
     }
 }
 

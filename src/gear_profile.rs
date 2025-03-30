@@ -311,36 +311,39 @@ impl GearProfile {
         );
         Ok(root_arc)
     }
-    pub fn root_radius(&self, radius: f64) -> Result<(f64, CircularArc), GearProfileError> {
+    pub fn root_fillet_radius(
+        &self,
+        root_fillet_radius: f64,
+    ) -> Result<CircularArc, GearProfileError> {
         let max_radius = self.full_root_fillet()?.radius;
-        if radius > max_radius {
+        if root_fillet_radius > max_radius {
             return Err(GearProfileError::InvalidRootRadius);
         }
         let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
         let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
-        let dx = -radius * roll_angle.sin();
-        let dy = radius * roll_angle.cos();
+        let dx = -root_fillet_radius * roll_angle.sin();
+        let dy = root_fillet_radius * roll_angle.cos();
 
         let root_radius_center = Point {
             x: involute_point.x - dx,
             y: involute_point.y - dy,
         };
-        let root_arc = CircularArc::new(
+        let arc = CircularArc::new(
             root_radius_center,
-            radius,
+            root_fillet_radius,
             dy.atan2(dx),
             PI + root_radius_center.angle(),
         );
-        let root_radius = root_radius_center.radius() - radius;
+        let root_radius = root_radius_center.radius() - root_fillet_radius;
 
         let root_diameter = 2.0 * root_radius;
-        Ok((root_diameter, root_arc))
+        Ok(arc)
     }
 
     pub fn root_radius_at_root_diameter(
         &self,
         root_diameter: f64,
-    ) -> Result<(f64, CircularArc), GearProfileError> {
+    ) -> Result<CircularArc, GearProfileError> {
         println!("\n");
         println!("root_diameter: {}", root_diameter);
         println!("self.base_diameter(): {:.6}", self.base_diameter());
@@ -375,7 +378,7 @@ impl GearProfile {
             dy.atan2(dx),
             PI + root_radius_center.angle(),
         );
-        Ok((root_radius, root_arc))
+        Ok((root_arc))
     }
 
     pub fn shifted_solidworks_equations(&self, tooth_shift: f64) -> Result<(), GearProfileError> {

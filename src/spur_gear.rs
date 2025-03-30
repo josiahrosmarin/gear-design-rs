@@ -1,4 +1,8 @@
-use crate::{error::SpurGearProfileError, gear_profile::GearProfile};
+use crate::{
+    error::{GearDesignError, SpurGearProfileError},
+    gear_profile::GearProfile,
+    geometry::CircularArc,
+};
 
 #[cfg(feature = "tip-relief")]
 /// Represents the parameters for tip relief.
@@ -31,7 +35,7 @@ pub enum Tip {
     /// A tip with a radius.
     ///
     /// Represents a gear with a rounded tip, where the radius is specified.
-    Radius(f64),
+    Radius(CircularArc),
 
     #[cfg(feature = "tip-relief")]
     /// A tip with relief.
@@ -65,13 +69,14 @@ pub enum RootFillet {
     /// A full radius at the root.
     ///
     /// Represents a root with a complete circular arc.
-    Full,
+    Full(CircularArc),
 
     /// A partial radius that terminates into the bottom land.
     ///
     /// Represents a root with a circular arc that blends into the bottom land.
-    Partial(f64),
+    Partial(CircularArc),
 
+    #[cfg(feature = "trochoid")]
     /// A trochoidal root radius.
     ///
     /// Represents a root formed by a trochoidal curve, with parameters defined in the `TrochoidParams` struct.
@@ -79,35 +84,89 @@ pub enum RootFillet {
 }
 
 /// Represents a complete gear with its involute profile and manufacturing parameters.
-pub struct Gear {
+pub struct SpurGear {
     /// The involute profile of the gear teeth.
     ///
     /// This field encapsulates the essential involute profile data, defined in the `GearProfile` struct.
     pub profile: GearProfile,
 
-    /// The root diameter (bottom land diameter) of the gear.
-    ///
-    /// This is the diameter at the bottom of the tooth space.
-    pub root_diameter: f64,
-
     /// The root radius of the gear teeth.
     ///
     /// This field defines the shape of the root of the tooth, using the `RootFillet` enum.
-    pub root_radius: RootFillet,
+    root_radius: RootFillet,
 
     /// The tip of the gear teeth.
     ///
     /// This field defines the shape of the tip of the tooth, using the `Tip` enum.
-    pub tip: Tip,
+    tip: Tip,
 
     /// The outer diameter of the gear.
     ///
     /// This is the overall diameter of the gear.
-    pub outer_diameter: f64,
+    outer_diameter: f64,
 
     /// The face width of the gear.
     ///
     /// This is the width of the gear teeth along the axis of rotation.
     pub face_width: f64,
     // Add other parameters as needed (e.g., bore diameter, material, etc.)
+}
+
+impl SpurGear {
+    pub fn new(
+        teeth: u32,
+        module: f64,
+        pressure_angle: f64,
+        face_width: f64,
+    ) -> Result<Self, GearDesignError> {
+        let profile = GearProfile::from_basic_params(teeth, module, pressure_angle)?;
+        let arc = profile.full_root_fillet()?;
+        let outer_diameter = profile.involute_end_diameter();
+        Ok(Self {
+            profile,
+            root_radius: RootFillet::Full(arc),
+            tip: Tip::Sharp,
+            outer_diameter,
+            face_width,
+        })
+    }
+
+    pub fn set_tip_radius(&mut self, tip_radius: f64) -> Result<(), GearDesignError> {
+        let arc = self
+            .profile
+            .apply_tip_radius(self.outer_diameter, tip_radius)?;
+        self.tip = Tip::Radius(arc);
+        Ok(())
+    }
+
+    pub fn tip_radius(&self) -> Option<f64> {
+        match self.tip {
+            Tip::Sharp => None,
+            Tip::Radius(arc) => Some(arc.radius),
+        }
+    }
+
+    pub fn set_root_diameter(&mut self, root_diameter: f64) -> Result<(), GearDesignError> {
+        let arc = self.profile.root_radius_at_root_diameter(root_diameter)?;
+        self.root_radius = RootFillet::Partial(arc);
+        Ok(())
+    }
+
+    pub fn set_root_fillet_radius(
+        &mut self,
+        root_fillet_radius: f64,
+    ) -> Result<(), GearDesignError> {
+        let arc = self.profile.root_fillet_radius(root_fillet_radius)?;
+        self.root_radius = RootFillet::Partial(arc);
+        Ok(())
+    }
+
+    pub fn root_diameter(&self) -> f64 {
+        match self.root_radius {
+            RootFillet::Full(arc) | RootFillet::Partial(arc) => {
+                let end_points = arc.end_points().unwrap();
+                end_points[0].radius().min(end_points[1].radius())
+            }
+        }
+    }
 }

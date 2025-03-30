@@ -2,7 +2,7 @@ use crate::{
     error::{GearMeshError, GearProfileError},
     gear_profile::GearProfile,
     geometry::Point,
-    spur_gear::Gear, // Import the Gear struct
+    spur_gear::SpurGear, // Import the Gear struct
 };
 
 /// Represents a mesh between two gears.

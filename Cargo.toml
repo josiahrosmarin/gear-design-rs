@@ -8,6 +8,7 @@ thiserror = "1.0"
 
 [features]
 tip-relief = []
+trochoid = []
 
 [lints.rust]
 dead_code = "allow"
