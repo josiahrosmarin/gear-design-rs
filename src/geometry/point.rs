@@ -30,6 +30,20 @@ impl Point {
             y: rotated_y + center.y,
         }
     }
+
+    pub fn mirror_horizontal(&self) -> Self {
+        Self {
+            x: -self.x,
+            y: self.y,
+        }
+    }
+
+    pub fn mirror_vertical(&self) -> Self {
+        Self {
+            x: self.x,
+            y: -self.y,
+        }
+    }
 }
 
 impl fmt::Display for Point {

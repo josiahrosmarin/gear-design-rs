@@ -1,7 +1,9 @@
+use std::f64::consts::PI;
+
 use crate::{
     error::{GearDesignError, SpurGearProfileError},
-    gear_profile::GearProfile,
-    geometry::CircularArc,
+    gear_profile::{approximate_involute, GearProfile},
+    geometry::{AngleSpan, CircularArc, CircularArcSvgParams},
 };
 
 #[cfg(feature = "tip-relief")]
@@ -168,5 +170,75 @@ impl SpurGear {
                 end_points[0].radius().min(end_points[1].radius())
             }
         }
+    }
+    pub fn to_svg(&self) -> Result<String, GearDesignError> {
+        let offset_angle = self.profile.offset_angle()?;
+        let teeth = self.profile.teeth();
+        let tooth_angle = 2.0 * PI / teeth as f64;
+
+        let mut svg_path = String::new();
+
+        let mut arcs = approximate_involute(&self.profile, 1e-6)?; // Tolerance for approximation
+        if let Tip::Radius(arc) = self.tip {
+            arcs.push(arc);
+        }
+        match self.root_radius {
+            RootFillet::Full(arc) | RootFillet::Partial(arc) => {
+                arcs.push(arc);
+            }
+        }
+
+        // Rotate arcs by offset angle (in-place modification)
+        for arc in &mut arcs {
+            arc.center = arc.center.rotated(offset_angle, None);
+            if let AngleSpan::Arc {
+                ref mut start,
+                ref mut end,
+            } = arc.angle_span
+            {
+                *start += offset_angle;
+                *end += offset_angle;
+            }
+        }
+
+        // Copy and mirror arcs (using clone)
+        let mut mirrored_arcs: Vec<CircularArc> = arcs
+            .clone()
+            .iter()
+            .filter_map(|arc| match arc.angle_span {
+                AngleSpan::Arc { start, end } => Some(CircularArc {
+                    center: arc.center.mirror_vertical(),
+                    radius: arc.radius,
+                    angle_span: AngleSpan::Arc {
+                        start: -start,
+                        end: -end,
+                    },
+                }),
+                _ => None,
+            })
+            .collect();
+
+        let mut all_arcs = arcs;
+        all_arcs.append(&mut mirrored_arcs);
+
+        // Convert arcs to svg parameters
+        let mut svg_params: Vec<CircularArcSvgParams> = all_arcs
+            .iter()
+            .filter_map(|arc| arc.svg_arc_params())
+            .collect();
+
+        for svg_param in &svg_params {
+            svg_path.push_str(&svg_param.to_svg_path_segment());
+        }
+
+        // iterate through svg params pushing output to svg_path
+        for _tooth in 1..self.profile.teeth() {
+            for svg_param in &mut svg_params {
+                svg_param.start = svg_param.start.rotated(tooth_angle, None);
+                svg_param.end = svg_param.end.rotated(tooth_angle, None);
+                svg_path.push_str(&svg_param.to_svg_path_segment());
+            }
+        }
+        Ok(svg_path)
     }
 }

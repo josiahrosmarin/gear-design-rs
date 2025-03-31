@@ -643,3 +643,83 @@ fn involute_end_for_tip_radius(
 
     Some(involute_end_radius * 2.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{gear_profile::GearProfile, geometry::AngleSpan};
+    use assert_approx_eq::assert_approx_eq;
+
+    #[test]
+    fn test_involute_end_diameter_initial() {
+        let teeth = 25;
+        let module = 1.0;
+        let pressure_angle_deg = 20.0;
+        let p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        assert_approx_eq!(p1.involute_end_diameter(), 27.0, 1e-6);
+    }
+
+    #[test]
+    fn test_set_form_diameter() {
+        let teeth = 25;
+        let module = 1.0;
+        let pressure_angle_deg = 20.0;
+        let mut p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        let form_diameter = 24.0;
+        match p1.set_form_diameter(form_diameter) {
+            Err(e) => panic!("Error setting form diameter: {}", e),
+            Ok(_) => assert_approx_eq!(p1.form_diameter(), form_diameter, 1e-6),
+        }
+    }
+
+    #[test]
+    fn test_apply_tip_radius() {
+        let teeth = 25;
+        let module = 1.0;
+        let pressure_angle_deg = 20.0;
+        let mut p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        let outer_diameter = (teeth as f64 + 2.0) * module;
+        let tip_radius = 0.2;
+        match p1.apply_tip_radius(outer_diameter, tip_radius) {
+            Err(e) => panic!("Error applying tip radius: {}", e),
+            Ok(arc) => {
+                assert_approx_eq!(arc.radius, tip_radius, 1e-6);
+                assert!(matches!(arc.angle_span, AngleSpan::Arc { .. }));
+                // You could add more specific checks on the arc's center and angles if needed
+            }
+        }
+    }
+
+    #[test]
+    fn test_root_radius_at_root_diameter() {
+        let teeth = 25;
+        let module = 1.0;
+        let pressure_angle_deg = 20.0;
+        let p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        let root_diameter = 23.0;
+        match p1.root_radius_at_root_diameter(root_diameter) {
+            Err(e) => panic!("Error calculating root radius: {}", e),
+            Ok(arc) => {
+                // The exact radius depends on the internal calculations,
+                // but we can check if an Arc is returned.
+                assert!(matches!(arc.angle_span, AngleSpan::Arc { .. }));
+                // You might want to add more precise checks if you know the expected radius.
+                // Based on your output, the radius seems to be around 0.650.
+                assert_approx_eq!(arc.radius, 0.650, 1e-3); // Using a slightly larger tolerance
+            }
+        }
+    }
+
+    #[test]
+    fn test_involute_end_diameter_after_operations() {
+        let teeth = 25;
+        let module = 1.0;
+        let pressure_angle_deg = 20.0;
+        let mut p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        let outer_diameter = (teeth as f64 + 2.0) * module;
+        let tip_radius = 0.2;
+        p1.set_form_diameter(24.0).unwrap();
+        p1.apply_tip_radius(outer_diameter, tip_radius).unwrap();
+        p1.root_radius_at_root_diameter(23.0).unwrap();
+        assert_approx_eq!(p1.involute_end_diameter(), 26.789951, 1e-6);
+    }
+}

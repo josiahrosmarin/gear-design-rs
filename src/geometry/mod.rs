@@ -1,5 +1,5 @@
 use crate::error::GeometryError;
-pub use circular_arc::CircularArc;
+pub use circular_arc::{AngleSpan, CircularArc, CircularArcSvgParams};
 pub use point::Point;
 pub use vector::Vector;
 
