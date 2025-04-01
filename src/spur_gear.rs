@@ -1,9 +1,9 @@
 use std::f64::consts::PI;
 
 use crate::{
-    error::{GearDesignError, SpurGearProfileError},
+    error::{GearDesignError, GearProfileError, SpurGearProfileError},
     gear_profile::{approximate_involute, GearProfile},
-    geometry::{AngleSpan, CircularArc, CircularArcSvgParams},
+    geometry::{AngleSpan, CircularArc, CircularArcSvgParams, Point},
 };
 
 #[cfg(feature = "tip-relief")]
@@ -95,7 +95,7 @@ pub struct SpurGear {
     /// The root radius of the gear teeth.
     ///
     /// This field defines the shape of the root of the tooth, using the `RootFillet` enum.
-    root_radius: RootFillet,
+    root_fillet: RootFillet,
 
     /// The tip of the gear teeth.
     ///
@@ -123,10 +123,11 @@ impl SpurGear {
     ) -> Result<Self, GearDesignError> {
         let profile = GearProfile::from_basic_params(teeth, module, pressure_angle)?;
         let arc = profile.full_root_fillet()?;
+
         let outer_diameter = profile.involute_end_diameter();
         Ok(Self {
             profile,
-            root_radius: RootFillet::Full(arc),
+            root_fillet: RootFillet::Full(arc),
             tip: Tip::Sharp,
             outer_diameter,
             face_width,
@@ -150,7 +151,7 @@ impl SpurGear {
 
     pub fn set_root_diameter(&mut self, root_diameter: f64) -> Result<(), GearDesignError> {
         let arc = self.profile.root_radius_at_root_diameter(root_diameter)?;
-        self.root_radius = RootFillet::Partial(arc);
+        self.root_fillet = RootFillet::Partial(arc);
         Ok(())
     }
 
@@ -159,67 +160,110 @@ impl SpurGear {
         root_fillet_radius: f64,
     ) -> Result<(), GearDesignError> {
         let arc = self.profile.root_fillet_radius(root_fillet_radius)?;
-        self.root_radius = RootFillet::Partial(arc);
+        self.root_fillet = RootFillet::Partial(arc);
         Ok(())
     }
 
     pub fn root_diameter(&self) -> f64 {
-        match self.root_radius {
+        match self.root_fillet {
             RootFillet::Full(arc) | RootFillet::Partial(arc) => {
                 let end_points = arc.end_points().unwrap();
-                end_points[0].radius().min(end_points[1].radius())
+                2.0 * end_points[0].radius().min(end_points[1].radius())
             }
         }
     }
+
+    pub fn outer_diameter(&self) -> f64 {
+        match self.tip {
+            Tip::Sharp => self.profile.involute_end_diameter(),
+            Tip::Radius(arc) => {
+                let [_start, end] = arc
+                    .end_points()
+                    .ok_or(GearProfileError::InvalidTipRadius)
+                    .unwrap();
+                2.0 * end.radius()
+            }
+        }
+    }
+
     pub fn to_svg(&self) -> Result<String, GearDesignError> {
-        let offset_angle = self.profile.offset_angle()?;
+        let offset_angle = -self.profile.offset_angle()?;
         let teeth = self.profile.teeth();
         let tooth_angle = 2.0 * PI / teeth as f64;
+        let tooth_half_angle = tooth_angle * 0.5;
 
         let mut svg_path = String::new();
 
-        let mut arcs = approximate_involute(&self.profile, 1e-6)?; // Tolerance for approximation
-        if let Tip::Radius(arc) = self.tip {
-            arcs.push(arc);
-        }
-        match self.root_radius {
-            RootFillet::Full(arc) | RootFillet::Partial(arc) => {
-                arcs.push(arc);
-            }
-        }
-
-        // Rotate arcs by offset angle (in-place modification)
-        for arc in &mut arcs {
-            arc.center = arc.center.rotated(offset_angle, None);
-            if let AngleSpan::Arc {
-                ref mut start,
-                ref mut end,
-            } = arc.angle_span
-            {
-                *start += offset_angle;
-                *end += offset_angle;
-            }
-        }
-
-        // Copy and mirror arcs (using clone)
-        let mut mirrored_arcs: Vec<CircularArc> = arcs
-            .clone()
-            .iter()
-            .filter_map(|arc| match arc.angle_span {
-                AngleSpan::Arc { start, end } => Some(CircularArc {
-                    center: arc.center.mirror_vertical(),
-                    radius: arc.radius,
-                    angle_span: AngleSpan::Arc {
-                        start: -start,
-                        end: -end,
-                    },
-                }),
-                _ => None,
-            })
+        let mut involute_arcs: Vec<CircularArc> = approximate_involute(&self.profile, 1e-3)?
+            .into_iter()
+            .map(|arc| arc.rotated_about_origin(offset_angle))
             .collect();
 
-        let mut all_arcs = arcs;
-        all_arcs.append(&mut mirrored_arcs);
+        let root_arc = match self.root_fillet {
+            RootFillet::Full(arc) | RootFillet::Partial(arc) => {
+                arc.rotated_about_origin(offset_angle)
+            }
+        };
+        let mut root_arcs = vec![root_arc, root_arc.mirror_vertical()];
+
+        let mut bottom_land_arcs = match self.root_fillet {
+            RootFillet::Full(_) => Vec::new(),
+            RootFillet::Partial(arc) => {
+                let [start, end] = arc
+                    .end_points()
+                    .ok_or(GearProfileError::InvalidRootRadius)?;
+                let origin = Point { x: 0.0, y: 0.0 };
+                println!("start: {}", start);
+                println!("end: {}", end);
+                let arc = CircularArc::new(
+                    origin,
+                    end.radius(),
+                    -tooth_half_angle,
+                    end.angle() + offset_angle,
+                );
+                vec![arc, arc.mirror_vertical()]
+            }
+        };
+
+        let mut tip_arcs = match self.tip {
+            Tip::Sharp => {
+                let final_involute_arc = involute_arcs
+                    .last()
+                    .ok_or(GearProfileError::InvoluteApproximationFailed)?;
+                let [start, end] = final_involute_arc
+                    .end_points()
+                    .ok_or(GearProfileError::InvoluteApproximationFailed)?;
+                let origin = Point { x: 0.0, y: 0.0 };
+                let angle = end.angle();
+                let arc = CircularArc::new(origin, end.radius(), angle, -angle);
+                vec![arc]
+            }
+            Tip::Radius(arc) => {
+                let arc = arc.rotated_about_origin(offset_angle);
+                let [start, end] = arc.end_points().ok_or(GearProfileError::InvalidTipRadius)?;
+                let origin = Point { x: 0.0, y: 0.0 };
+                let angle = end.angle();
+                let top_land_arc = CircularArc::new(origin, end.radius(), angle, -angle);
+
+                vec![arc, top_land_arc, arc.mirror_vertical()]
+            }
+        };
+
+        let mut mirrored = (&involute_arcs)
+            .into_iter()
+            .map(|arc| arc.mirror_vertical())
+            .collect();
+        involute_arcs.append(&mut mirrored);
+
+        let mut all_arcs = Vec::new();
+        all_arcs.append(&mut involute_arcs);
+        all_arcs.append(&mut root_arcs);
+        all_arcs.append(&mut bottom_land_arcs);
+        all_arcs.append(&mut tip_arcs);
+
+        for arc in &all_arcs {
+            println!("arc: {}", arc);
+        }
 
         // Convert arcs to svg parameters
         let mut svg_params: Vec<CircularArcSvgParams> = all_arcs
@@ -227,8 +271,9 @@ impl SpurGear {
             .filter_map(|arc| arc.svg_arc_params())
             .collect();
 
+        let scale_factor = 100.0;
         for svg_param in &svg_params {
-            svg_path.push_str(&svg_param.to_svg_path_segment());
+            svg_path.push_str(&svg_param.to_svg_path_segment(scale_factor));
         }
 
         // iterate through svg params pushing output to svg_path
@@ -236,9 +281,27 @@ impl SpurGear {
             for svg_param in &mut svg_params {
                 svg_param.start = svg_param.start.rotated(tooth_angle, None);
                 svg_param.end = svg_param.end.rotated(tooth_angle, None);
-                svg_path.push_str(&svg_param.to_svg_path_segment());
+                svg_path.push_str(&svg_param.to_svg_path_segment(scale_factor));
             }
         }
-        Ok(svg_path)
+        // Construct the final SVG
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="-{0} -{0} {1} {1}">
+               <path d="{2}" fill="none" stroke="black" />
+               <circle cx="0" cy="0" r="{3}" fill="none" stroke="red" stroke-dasharray="5,5" />
+               <circle cx="0" cy="0" r="{4}" fill="none" stroke="green" stroke-dasharray="5,5" />
+               <circle cx="0" cy="0" r="{5}" fill="none" stroke="gray" stroke-dasharray="5,5" />
+               <circle cx="0" cy="0" r="{6}" fill="none" stroke="gray" stroke-dasharray="5,5" />
+             </svg>"#,
+            scale_factor * self.outer_diameter,
+            scale_factor * self.outer_diameter * 2.0,
+            svg_path,
+            self.profile.pitch_diameter() / 2.0 * scale_factor,
+            self.profile.base_diameter() / 2.0 * scale_factor,
+            self.outer_diameter() / 2.0 * scale_factor,
+            self.root_diameter() / 2.0 * scale_factor,
+        );
+
+        Ok(svg)
     }
 }

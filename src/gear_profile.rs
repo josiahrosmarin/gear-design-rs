@@ -75,7 +75,7 @@ impl GearProfile {
         let circular_thickness = 0.5 * module * PI;
         let pitch_diameter = teeth_f64 * module;
         let base_diameter = pitch_diameter * pressure_angle.to_radians().cos();
-        let form_diameter = base_diameter;
+        let form_diameter = base_diameter.max(pitch_diameter - (2.5 * module));
         let involute_end_diameter = pitch_diameter + (2.0 * module);
 
         if base_diameter > form_diameter {
@@ -290,14 +290,14 @@ impl GearProfile {
             - involute_point.x * radius_polar_allotment.sin())
             / (roll_angle - radius_polar_allotment).cos();
 
-        let v = Vector::from_angle_and_radius(roll_angle - PI / 2.0, root_fillet_radius);
+        let v = Vector::from_angle_and_radius(roll_angle + PI / 2.0, root_fillet_radius);
         let root_fillet_center = &involute_point - &v;
 
         Ok(CircularArc::new(
             root_fillet_center,
             root_fillet_radius,
             v.angle(),
-            PI + root_fillet_center.angle(),
+            (PI + root_fillet_center.angle()).rem_euclid(2.0 * PI),
         ))
     }
     pub fn root_fillet_radius(
@@ -311,14 +311,14 @@ impl GearProfile {
         let roll_angle = roll_angle_at_diameter(self.base_diameter(), self.form_diameter())?;
         let involute_point = involute(self.base_diameter(), roll_angle, 0.0);
 
-        let v = Vector::from_angle_and_radius(roll_angle - PI / 2.0, root_fillet_radius);
+        let v = Vector::from_angle_and_radius(roll_angle + PI / 2.0, root_fillet_radius);
         let root_fillet_center = &involute_point - &v;
 
         Ok(CircularArc::new(
             root_fillet_center,
             root_fillet_radius,
             v.angle(),
-            PI + root_fillet_center.angle(),
+            (PI + root_fillet_center.angle()).rem_euclid(2.0 * PI),
         ))
     }
 
@@ -526,6 +526,7 @@ pub fn approximate_involute(
     let form_diameter = profile.form_diameter();
 
     let involute_end_diameter = profile.involute_end_diameter();
+    println!("involute_end_diameter: {}", involute_end_diameter);
 
     let double_annulus = involute_end_diameter - form_diameter;
 
@@ -546,11 +547,10 @@ pub fn approximate_involute(
             value = value + i as f64;
             spacing.push(value);
         }
-        let sum: f64 = spacing.iter().sum();
 
         let diameters: Vec<f64> = spacing
             .into_iter()
-            .map(|value| form_diameter + value * double_annulus / sum)
+            .map(|v| form_diameter + double_annulus * v / value)
             .collect();
 
         // Form and test each arc
@@ -694,7 +694,8 @@ mod tests {
         let teeth = 25;
         let module = 1.0;
         let pressure_angle_deg = 20.0;
-        let p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        let mut p1 = GearProfile::from_basic_params(teeth, module, pressure_angle_deg).unwrap();
+        p1.set_form_diameter(24.0).unwrap();
         let root_diameter = 23.0;
         match p1.root_radius_at_root_diameter(root_diameter) {
             Err(e) => panic!("Error calculating root radius: {}", e),
@@ -704,7 +705,7 @@ mod tests {
                 assert!(matches!(arc.angle_span, AngleSpan::Arc { .. }));
                 // You might want to add more precise checks if you know the expected radius.
                 // Based on your output, the radius seems to be around 0.650.
-                assert_approx_eq!(arc.radius, 0.650, 1e-3); // Using a slightly larger tolerance
+                assert_approx_eq!(arc.radius, 0.6495, 1e-3); // Using a slightly larger tolerance
             }
         }
     }

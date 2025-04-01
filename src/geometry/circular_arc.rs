@@ -74,12 +74,11 @@ impl CircularArc {
         let start_point = &self.center + &Vector::from_angle_and_radius(start_angle, self.radius);
         let end_point = &self.center + &Vector::from_angle_and_radius(end_angle, self.radius);
 
-        let delta = end_angle - start_angle;
-        let large_arc_flag = delta.abs() > std::f64::consts::PI;
+        let large_arc_flag = (end_angle - start_angle).rem_euclid(2.0 * PI) > std::f64::consts::PI;
 
         Some(CircularArcSvgParams {
             start: start_point,
-            large_arc_flag,
+            large_arc_flag: false,
             sweep_flag: true,
             end: end_point,
             radius: self.radius,
@@ -112,6 +111,22 @@ impl CircularArc {
                 },
                 AngleSpan::FullCircle => AngleSpan::FullCircle,
             },
+        }
+    }
+
+    pub fn rotated_about_origin(&self, angle: f64) -> Self {
+        match self.angle_span {
+            AngleSpan::FullCircle => Self {
+                center: self.center.rotated(angle, None),
+                radius: self.radius,
+                angle_span: AngleSpan::FullCircle,
+            },
+            AngleSpan::Arc { start, end } => Self::new(
+                self.center.rotated(angle, None),
+                self.radius,
+                start + angle,
+                end + angle,
+            ),
         }
     }
 }
@@ -188,17 +203,17 @@ impl CircularArcSvgParams {
     /// Simplifications:
     /// - Does not handle elliptical arcs with different x and y radii.
     /// - Does not allow for x-axis rotation of the ellipse.
-    pub fn to_svg_path_segment(&self) -> String {
+    pub fn to_svg_path_segment(&self, scale_factor: f64) -> String {
         format!(
             "M {} {} A {} {} 0 {} {} {} {}",
-            self.start.x,
-            self.start.y,
-            self.radius,
-            self.radius,
+            self.start.x * scale_factor,
+            self.start.y * scale_factor,
+            self.radius * scale_factor,
+            self.radius * scale_factor,
             self.large_arc_flag as u8,
             self.sweep_flag as u8,
-            self.end.x,
-            self.end.y
+            self.end.x * scale_factor,
+            self.end.y * scale_factor
         )
     }
 }
@@ -207,7 +222,6 @@ impl CircularArcSvgParams {
 mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
-    use std::f64::consts::PI;
 
     #[test]
     fn test_point_mirror_vertical() {
@@ -222,8 +236,8 @@ mod tests {
         let center = Point { x: 1.0, y: 2.0 };
         let radius = 5.0;
         let angle_span = AngleSpan::Arc {
-            start: PI / 4.0,
-            end: PI,
+            start: 45.0_f64.to_radians(),
+            end: 180.0_f64.to_radians(),
         };
         let arc = CircularArc {
             center,
@@ -237,8 +251,8 @@ mod tests {
         assert_approx_eq!(mirrored_arc.center.y, -2.0);
         assert_approx_eq!(mirrored_arc.radius, 5.0);
         if let AngleSpan::Arc { start, end } = mirrored_arc.angle_span {
-            assert_approx_eq!(start, -PI, 1e-6);
-            assert_approx_eq!(end, -PI / 4.0, 1e-6);
+            assert_approx_eq!(start, 180.0_f64.to_radians(), 1e-6);
+            assert_approx_eq!(end, 315.0_f64.to_radians(), 1e-6);
         } else {
             panic!("Expected AngleSpan::Arc");
         }
@@ -257,8 +271,8 @@ mod tests {
         let center2 = Point { x: 0.0, y: 0.0 };
         let radius2 = 1.0;
         let angle_span2 = AngleSpan::Arc {
-            start: 3.0 * PI / 2.0,
-            end: PI / 2.0,
+            start: 270.0_f64.to_radians(),
+            end: 90.0_f64.to_radians(),
         };
         let arc2 = CircularArc {
             center: center2,
@@ -267,8 +281,8 @@ mod tests {
         };
         let mirrored_arc2 = arc2.mirror_vertical();
         if let AngleSpan::Arc { start, end } = mirrored_arc2.angle_span {
-            assert_approx_eq!(start, -PI / 2.0, 1e-6);
-            assert_approx_eq!(end, -3.0 * PI / 2.0, 1e-6);
+            assert_approx_eq!(start, 270.0_f64.to_radians(), 1e-6);
+            assert_approx_eq!(end, 90.0_f64.to_radians(), 1e-6);
         } else {
             panic!("Expected AngleSpan::Arc for arc2");
         }

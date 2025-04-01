@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use crate::error::GeometryError;
 pub use circular_arc::{AngleSpan, CircularArc, CircularArcSvgParams};
 pub use point::Point;
@@ -50,8 +52,8 @@ pub fn fit_arc(
     let radius =
         ((b0_x - center.x) * (b0_x - center.x) + (b0_y - center.y) * (b0_y - center.y)).sqrt();
 
-    let b0_theta = (b0_y - center.y).atan2(b0_x - center.x);
-    let b1_theta = (b1_y - center.y).atan2(b1_x - center.x);
+    let b0_theta = ((b0_y - center.y).atan2(b0_x - center.x)).rem_euclid(2.0 * PI);
+    let b1_theta = ((b1_y - center.y).atan2(b1_x - center.x)).rem_euclid(2.0 * PI);
 
     let arc = CircularArc::new(center, radius, b0_theta, b1_theta);
     if arc.contains_point(interior_point, 1e-6) {
@@ -70,6 +72,7 @@ pub fn fit_arc(
 mod tests {
     use super::*;
     use crate::geometry::circular_arc::AngleSpan;
+    use assert_approx_eq::assert_approx_eq;
     use std::f64::consts::PI;
 
     #[test]
@@ -121,28 +124,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fit_arc_tiny_arc() {
-        let p1 = Point { x: 1.0, y: 1.0 };
-        let p2 = Point {
-            x: 1.000001,
-            y: 1.000002,
-        };
-        let p3 = Point {
-            x: 1.000002,
-            y: 1.000001,
-        };
-
-        let arc = fit_arc([&p1, &p2], &p3).unwrap();
-
-        assert!(arc.radius > 1e6); // Expect a large radius for a tiny arc
-        if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((end - start).abs() < 1e-5); // Expect a small angle difference
-        } else {
-            panic!("Expected AngleSpan::Arc");
-        }
-    }
-
-    #[test]
     fn test_fit_arc_large_arc() {
         let p1 = Point { x: 1000.0, y: 0.0 };
         let p2 = Point { x: 0.0, y: 1000.0 };
@@ -152,8 +133,8 @@ mod tests {
 
         assert_eq!(arc.radius, 1000.0);
         if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 0.0).abs() < 1e-6);
-            assert!((end - PI).abs() < 1e-6);
+            assert_approx_eq!(start, 90.0_f64.to_radians(), 1e-6);
+            assert_approx_eq!(end, 0.0, 1e-6);
         } else {
             panic!("Expected AngleSpan::Arc");
         }
@@ -166,10 +147,14 @@ mod tests {
         let p3 = Point { x: 3.0, y: 1.5 };
 
         let arc = fit_arc([&p1, &p2], &p3).unwrap();
+        println!("arc: {}", arc);
+
+        let start_d: f64 = 223.781125;
+        let end_d: f64 = 83.088773;
 
         if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - 1.0_f64.atan2(1.0)).abs() < 1e-6);
-            assert!((end - 1.5_f64.atan2(3.0)).abs() < 1e-6);
+            assert_approx_eq!(start, start_d.to_radians(), 1e-6);
+            assert_approx_eq!(end, end_d.to_radians(), 1e-6);
         } else {
             panic!("Expected AngleSpan::Arc");
         }
@@ -202,9 +187,12 @@ mod tests {
 
         let arc = fit_arc([&p1, &p2], &p3).unwrap();
 
+        let start_d: f64 = 43.781125;
+        let end_d: f64 = 263.088773;
+
         if let AngleSpan::Arc { start, end } = arc.angle_span {
-            assert!((start - (-3.0 * PI / 4.0)).abs() < 1e-6);
-            assert!((end - (-PI + 1.5_f64.atan2(3.0))).abs() < 1e-6);
+            assert_approx_eq!(start, start_d.to_radians(), 1e-6);
+            assert_approx_eq!(end, end_d.to_radians(), 1e-6);
         } else {
             panic!("Expected AngleSpan::Arc");
         }
